@@ -62,43 +62,71 @@ window.addEventListener('load', function() {
 
 // App Initialization
 async function initializeApp() {
-    // Load configuration from serverless function
-    await loadConfiguration();
+    console.log('Initializing app...');
     
-    // Check user onboarding status and show appropriate screen
-    navigateToCorrectScreen();
-    
-    // Initialize event listeners
-    setupEventListeners();
-    
-    // Initialize voice recognition
-    initializeVoiceRecognition();
-    
-    // Initialize Google API
-    initializeGoogleAPI();
+    try {
+        // Load configuration from serverless function
+        await loadConfiguration();
+        
+        // Check user onboarding status and show appropriate screen
+        navigateToCorrectScreen();
+        
+        // Initialize event listeners
+        setupEventListeners();
+        
+        // Initialize voice recognition
+        initializeVoiceRecognition();
+        
+        // Initialize Google API
+        initializeGoogleAPI();
+        
+        console.log('App initialization complete');
+        
+    } catch (error) {
+        console.error('App initialization failed:', error);
+        
+        // Fallback to onboarding screen on error
+        showScreen('onboarding-screen');
+    }
 }
 
 // Navigate to correct screen based on onboarding completion
 function navigateToCorrectScreen() {
     const savedUser = localStorage.getItem('currentUser');
     
+    console.log('Navigating to correct screen. SavedUser:', savedUser);
+    
     if (!savedUser) {
         // No user data - start onboarding
+        console.log('No saved user, showing onboarding screen');
         showScreen('onboarding-screen');
         return;
     }
     
-    currentUser = JSON.parse(savedUser);
+    try {
+        currentUser = JSON.parse(savedUser);
+        console.log('Current user loaded:', currentUser);
+    } catch (error) {
+        console.error('Error parsing saved user data:', error);
+        // Clear corrupted data and restart onboarding
+        currentUser = null;
+        localStorage.removeItem('currentUser');
+        showScreen('onboarding-screen');
+        return;
+    }
     
     // Check if user has completed all onboarding steps
     if (isOnboardingComplete()) {
+        console.log('Onboarding complete, showing chat screen');
         showScreen('chat-screen');
         updateProfile();
     } else if (hasUserName()) {
         // Has name but no Google auth - show auth screen
+        console.log('Has name but no auth, showing auth screen');
         showScreen('auth-screen');
     } else {
         // Incomplete data - restart onboarding
+        console.log('Incomplete data, restarting onboarding');
         currentUser = null;
         localStorage.removeItem('currentUser');
         showScreen('onboarding-screen');
@@ -121,6 +149,15 @@ function hasUserName() {
 
 // Screen Navigation with onboarding validation
 function showScreen(screenId) {
+    console.log(`Attempting to show screen: ${screenId}`);
+    
+    // Check if screen exists
+    const targetScreen = document.getElementById(screenId);
+    if (!targetScreen) {
+        console.error(`Screen ${screenId} not found!`);
+        return;
+    }
+    
     // Validate screen access based on onboarding status
     if (!isScreenAccessAllowed(screenId)) {
         console.warn(`Access denied to ${screenId}. Redirecting to appropriate screen.`);
@@ -134,7 +171,8 @@ function showScreen(screenId) {
     });
     
     // Show target screen
-    document.getElementById(screenId).classList.add('active');
+    targetScreen.classList.add('active');
+    console.log(`Screen ${screenId} is now active`);
 }
 
 // Check if user is allowed to access a specific screen
@@ -150,6 +188,7 @@ function isScreenAccessAllowed(screenId) {
             return isOnboardingComplete(); // Need everything complete
             
         default:
+            console.warn(`Unknown screen: ${screenId}`);
             return false;
     }
 }
@@ -328,64 +367,96 @@ function handleGoogleAuth() {
         return;
     }
     
-    // Show loading state
+    // Get auth button reference
     const authButton = document.getElementById('google-auth-btn');
+    
+    // Function to reset button state
+    function resetButtonState() {
+        if (authButton) {
+            authButton.disabled = false;
+            authButton.textContent = 'Sign in with Google';
+            authButton.style.opacity = '1';
+        }
+    }
+    
+    // Show loading state
     if (authButton) {
         authButton.disabled = true;
         authButton.textContent = 'Signing in...';
         authButton.style.opacity = '0.7';
     }
     
-    // Initialize OAuth2 token client (Modern GSI approach)
-    const tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CONFIG.GOOGLE_CLIENT_ID,
-        scope: CONFIG.GOOGLE_SHEETS_SCOPE,
-        callback: (tokenResponse) => {
-            if (tokenResponse.error) {
-                console.error('Authentication failed:', tokenResponse.error);
-                alert('Authentication failed. Please try again.');
-                
-                // Reset button state
-                if (authButton) {
-                    authButton.disabled = false;
-                    authButton.textContent = 'Sign in with Google';
-                    authButton.style.opacity = '1';
+    try {
+        // Initialize OAuth2 token client (Modern GSI approach)
+        const tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: CONFIG.GOOGLE_CLIENT_ID,
+            scope: CONFIG.GOOGLE_SHEETS_SCOPE,
+            callback: (tokenResponse) => {
+                if (tokenResponse.error) {
+                    console.error('Authentication failed:', tokenResponse.error);
+                    
+                    // Show specific error messages
+                    let errorMessage = 'Authentication failed. ';
+                    switch (tokenResponse.error) {
+                        case 'access_denied':
+                            errorMessage += 'Access was denied. Please try again and grant the necessary permissions.';
+                            break;
+                        case 'invalid_client':
+                            errorMessage += 'Invalid client configuration. Please check your OAuth settings.';
+                            break;
+                        case 'invalid_request':
+                            errorMessage += 'Invalid request. Please check your domain configuration.';
+                            break;
+                        default:
+                            errorMessage += `Error: ${tokenResponse.error}. Please try again.`;
+                    }
+                    
+                    alert(errorMessage);
+                    resetButtonState();
+                    return;
                 }
-                return;
-            }
-            
-            // Store access token
-            currentUser.accessToken = tokenResponse.access_token;
-            
-            // Get user profile info
-            getUserProfile(tokenResponse.access_token).then(profile => {
-                currentUser.email = profile.email;
-                currentUser.googleId = profile.id;
-                currentUser.name = currentUser.name || profile.name;
                 
-                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                // Store access token
+                currentUser.accessToken = tokenResponse.access_token;
                 
-                // Create or access Google Sheet
-                createExpenseSheet().then(() => {
-                    // Use proper navigation validation
-                    navigateToCorrectScreen();
+                // Get user profile info
+                getUserProfile(tokenResponse.access_token).then(profile => {
+                    currentUser.email = profile.email;
+                    currentUser.googleId = profile.id;
+                    currentUser.name = currentUser.name || profile.name;
+                    
+                    localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                    
+                    // Create or access Google Sheet
+                    createExpenseSheet().then(() => {
+                        // Use proper navigation validation
+                        navigateToCorrectScreen();
+                    }).catch(error => {
+                        console.error('Failed to create expense sheet:', error);
+                        alert('Failed to create expense sheet. Please try again.');
+                        resetButtonState();
+                    });
+                }).catch(error => {
+                    console.error('Failed to get user profile:', error);
+                    alert('Failed to get user profile. Please try again.');
+                    resetButtonState();
                 });
-            }).catch(error => {
-                console.error('Failed to get user profile:', error);
-                alert('Failed to get user profile. Please try again.');
-                
-                // Reset button state
-                if (authButton) {
-                    authButton.disabled = false;
-                    authButton.textContent = 'Sign in with Google';
-                    authButton.style.opacity = '1';
-                }
-            });
-        }
-    });
-    
-    // Request access token
-    tokenClient.requestAccessToken({ prompt: 'consent' });
+            },
+            error_callback: (error) => {
+                console.error('OAuth initialization error:', error);
+                alert('OAuth initialization failed. Please check your configuration.');
+                resetButtonState();
+            }
+        });
+        
+        // Request access token
+        tokenClient.requestAccessToken({ prompt: 'consent' });
+        
+    } catch (error) {
+        console.error('OAuth setup error:', error);
+        alert('OAuth setup failed. Please check your configuration and try again.');
+        resetButtonState();
+    }
 }
 
 // Get user profile using access token
@@ -872,6 +943,28 @@ function setCurrentUser(user) {
 function getCurrentUser() {
     return currentUser;
 }
+
+// Debug function to reset app state
+function resetAppState() {
+    console.log('Resetting app state...');
+    
+    // Clear all user data
+    localStorage.removeItem('currentUser');
+    currentUser = null;
+    
+    // Sign out from Google (GSI approach)
+    if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
+        google.accounts.id.disableAutoSelect();
+    }
+    
+    // Navigate to onboarding
+    showScreen('onboarding-screen');
+    
+    console.log('App state reset complete');
+}
+
+// Make reset function available globally for debugging
+window.resetAppState = resetAppState;
 
 // Export functions for testing (ES6 exports)
 export {
