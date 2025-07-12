@@ -32,7 +32,7 @@ async function loadConfiguration() {
         
         // Fallback to local configuration for development
         CONFIG = {
-            GOOGLE_CLIENT_ID: '968692652896-uddf8d6fs03e168qucqfgv0qc3taagss.apps.googleusercontent.com',
+            GOOGLE_CLIENT_ID: 'YOUR_GOOGLE_CLIENT_ID_HERE',
             GOOGLE_SHEETS_SCOPE: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly',
             APP_NAME: 'Personal Expense Tracker',
             SHEET_NAME: 'Personal Expenses',
