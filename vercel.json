@@ -1,22 +1,6 @@
 {
   "version": 2,
   "name": "personal-expense-tracker-pwa",
-  "builds": [
-    {
-      "src": "index.html",
-      "use": "@vercel/static"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
-    }
-  ],
   "headers": [
     {
       "source": "/sw.js",
@@ -36,19 +20,5 @@
         }
       ]
     }
-  ],
-  "functions": {
-    "api/config.js": {
-      "runtime": "nodejs18.x"
-    },
-    "api/parse-expense.js": {
-      "runtime": "nodejs18.x"
-    },
-    "api/google-sheets.js": {
-      "runtime": "nodejs18.x"
-    }
-  },
-  "env": {
-    "NODE_ENV": "production"
-  }
+  ]
 } 
