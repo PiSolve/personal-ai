@@ -65,15 +65,8 @@ async function initializeApp() {
     // Load configuration from serverless function
     await loadConfiguration();
     
-    // Check if user is already logged in
-    const savedUser = localStorage.getItem('currentUser');
-    if (savedUser) {
-        currentUser = JSON.parse(savedUser);
-        showScreen('chat-screen');
-        updateProfile();
-    } else {
-        showScreen('onboarding-screen');
-    }
+    // Check user onboarding status and show appropriate screen
+    navigateToCorrectScreen();
     
     // Initialize event listeners
     setupEventListeners();
@@ -85,8 +78,56 @@ async function initializeApp() {
     initializeGoogleAPI();
 }
 
-// Screen Navigation
+// Navigate to correct screen based on onboarding completion
+function navigateToCorrectScreen() {
+    const savedUser = localStorage.getItem('currentUser');
+    
+    if (!savedUser) {
+        // No user data - start onboarding
+        showScreen('onboarding-screen');
+        return;
+    }
+    
+    currentUser = JSON.parse(savedUser);
+    
+    // Check if user has completed all onboarding steps
+    if (isOnboardingComplete()) {
+        showScreen('chat-screen');
+        updateProfile();
+    } else if (hasUserName()) {
+        // Has name but no Google auth - show auth screen
+        showScreen('auth-screen');
+    } else {
+        // Incomplete data - restart onboarding
+        currentUser = null;
+        localStorage.removeItem('currentUser');
+        showScreen('onboarding-screen');
+    }
+}
+
+// Check if user has completed all onboarding steps
+function isOnboardingComplete() {
+    return currentUser && 
+           currentUser.name && 
+           currentUser.accessToken && 
+           currentUser.email &&
+           currentUser.sheetId;
+}
+
+// Check if user has entered their name
+function hasUserName() {
+    return currentUser && currentUser.name && currentUser.name.trim() !== '';
+}
+
+// Screen Navigation with onboarding validation
 function showScreen(screenId) {
+    // Validate screen access based on onboarding status
+    if (!isScreenAccessAllowed(screenId)) {
+        console.warn(`Access denied to ${screenId}. Redirecting to appropriate screen.`);
+        navigateToCorrectScreen();
+        return;
+    }
+    
     // Hide all screens
     document.querySelectorAll('.screen').forEach(screen => {
         screen.classList.remove('active');
@@ -96,8 +137,87 @@ function showScreen(screenId) {
     document.getElementById(screenId).classList.add('active');
 }
 
+// Check if user is allowed to access a specific screen
+function isScreenAccessAllowed(screenId) {
+    switch (screenId) {
+        case 'onboarding-screen':
+            return true; // Always accessible
+            
+        case 'auth-screen':
+            return hasUserName(); // Need name first
+            
+        case 'chat-screen':
+            return isOnboardingComplete(); // Need everything complete
+            
+        default:
+            return false;
+    }
+}
+
+// Prevent unauthorized navigation through touch gestures or other means
+function preventUnauthorizedNavigation() {
+    // Block common navigation events on screens
+    const screens = document.querySelectorAll('.screen');
+    
+    screens.forEach(screen => {
+        // Prevent touch gestures that might trigger navigation
+        screen.addEventListener('touchstart', (e) => {
+            const screenId = screen.id;
+            if (!isScreenAccessAllowed(screenId) && !screen.classList.contains('active')) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        });
+        
+        // Prevent swipe gestures
+        screen.addEventListener('touchmove', (e) => {
+            const screenId = screen.id;
+            if (!isScreenAccessAllowed(screenId) && !screen.classList.contains('active')) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        });
+        
+        // Prevent clicks on unauthorized screens
+        screen.addEventListener('click', (e) => {
+            const screenId = screen.id;
+            if (!isScreenAccessAllowed(screenId) && !screen.classList.contains('active')) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.warn(`Blocked unauthorized access to ${screenId}`);
+                navigateToCorrectScreen();
+            }
+        });
+    });
+    
+    // Override any potential direct screen manipulation
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+                const screen = mutation.target;
+                const screenId = screen.id;
+                
+                // If someone tries to manually activate an unauthorized screen
+                if (screen.classList.contains('active') && !isScreenAccessAllowed(screenId)) {
+                    console.warn(`Blocked unauthorized activation of ${screenId}`);
+                    screen.classList.remove('active');
+                    navigateToCorrectScreen();
+                }
+            }
+        });
+    });
+    
+    // Observe all screens for unauthorized changes
+    screens.forEach(screen => {
+        observer.observe(screen, { attributes: true, attributeFilter: ['class'] });
+    });
+}
+
 // Event Listeners Setup
 function setupEventListeners() {
+    // Prevent unintended screen navigation
+    preventUnauthorizedNavigation();
+    
     // Onboarding
     document.getElementById('start-btn').addEventListener('click', handleStartButton);
     
@@ -247,8 +367,8 @@ function handleGoogleAuth() {
                 
                 // Create or access Google Sheet
                 createExpenseSheet().then(() => {
-                    showScreen('chat-screen');
-                    updateProfile();
+                    // Use proper navigation validation
+                    navigateToCorrectScreen();
                 });
             }).catch(error => {
                 console.error('Failed to get user profile:', error);
@@ -704,6 +824,7 @@ function updateProfile() {
 }
 
 function handleLogout() {
+    // Clear all user data
     localStorage.removeItem('currentUser');
     currentUser = null;
     
@@ -712,8 +833,11 @@ function handleLogout() {
         google.accounts.id.disableAutoSelect();
     }
     
+    // Hide any open modals
     hideProfileModal();
-    showScreen('onboarding-screen');
+    
+    // Navigate to appropriate screen based on current state
+    navigateToCorrectScreen();
 }
 
 // Service Worker Registration for PWA
