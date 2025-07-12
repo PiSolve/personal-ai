@@ -1,0 +1,767 @@
+// App State
+let currentUser = null;
+let isListening = false;
+let recognition = null;
+let currentExpenseData = null;
+let googleApiReady = false;
+
+// Configuration will be loaded from serverless function
+let CONFIG = null;
+
+// Initialize app when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, initializing app...');
+    initializeApp();
+});
+
+// Load configuration from serverless function
+async function loadConfiguration() {
+    try {
+        console.log('Loading configuration from serverless function...');
+        
+        const response = await fetch('/api/config');
+        if (!response.ok) {
+            throw new Error(`Configuration loading failed: ${response.status}`);
+        }
+        
+        CONFIG = await response.json();
+        console.log('Configuration loaded successfully');
+        
+    } catch (error) {
+        console.error('Failed to load configuration:', error);
+        
+        // Fallback to local configuration for development
+        CONFIG = {
+            GOOGLE_CLIENT_ID: '968692652896-uddf8d6fs03e168qucqfgv0qc3taagss.apps.googleusercontent.com',
+            GOOGLE_SHEETS_SCOPE: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly',
+            APP_NAME: 'Personal Expense Tracker',
+            SHEET_NAME: 'Personal Expenses',
+            EXPENSE_CATEGORIES: ['Food & Dining', 'Transportation', 'Shopping', 'Entertainment', 'Bills & Utilities', 'Healthcare', 'Education', 'Travel', 'Personal Care', 'Others'],
+            PAYMENT_MODES: ['Cash', 'Credit Card', 'Debit Card', 'UPI', 'Net Banking', 'Digital Wallet'],
+            API_ENDPOINTS: {
+                PARSE_EXPENSE: '/api/parse-expense',
+                CONFIG: '/api/config',
+                GOOGLE_SHEETS: '/api/google-sheets'
+            }
+        };
+        
+        console.log('Using fallback configuration');
+    }
+}
+
+// Add a window load event to ensure all scripts are loaded
+window.addEventListener('load', function() {
+    console.log('Window loaded, checking Google Identity Services...');
+    console.log('google available:', typeof google !== 'undefined');
+    if (typeof google !== 'undefined') {
+        console.log('google.accounts available:', typeof google.accounts !== 'undefined');
+        console.log('google.accounts.oauth2 available:', typeof google.accounts?.oauth2 !== 'undefined');
+        console.log('google.accounts.id available:', typeof google.accounts?.id !== 'undefined');
+    }
+});
+
+// App Initialization
+async function initializeApp() {
+    // Load configuration from serverless function
+    await loadConfiguration();
+    
+    // Check if user is already logged in
+    const savedUser = localStorage.getItem('currentUser');
+    if (savedUser) {
+        currentUser = JSON.parse(savedUser);
+        showScreen('chat-screen');
+        updateProfile();
+    } else {
+        showScreen('onboarding-screen');
+    }
+    
+    // Initialize event listeners
+    setupEventListeners();
+    
+    // Initialize voice recognition
+    initializeVoiceRecognition();
+    
+    // Initialize Google API
+    initializeGoogleAPI();
+}
+
+// Screen Navigation
+function showScreen(screenId) {
+    // Hide all screens
+    document.querySelectorAll('.screen').forEach(screen => {
+        screen.classList.remove('active');
+    });
+    
+    // Show target screen
+    document.getElementById(screenId).classList.add('active');
+}
+
+// Event Listeners Setup
+function setupEventListeners() {
+    // Onboarding
+    document.getElementById('start-btn').addEventListener('click', handleStartButton);
+    
+    // Google Auth
+    document.getElementById('google-auth-btn').addEventListener('click', handleGoogleAuth);
+    
+    // Chat functionality
+    document.getElementById('send-btn').addEventListener('click', handleSendMessage);
+    document.getElementById('text-input').addEventListener('keypress', handleInputKeyPress);
+    document.getElementById('voice-btn').addEventListener('click', handleVoiceInput);
+    
+    // Profile
+    document.getElementById('profile-icon').addEventListener('click', showProfileModal);
+    document.getElementById('logout-btn').addEventListener('click', handleLogout);
+    
+    // Expense form
+    document.getElementById('confirm-expense').addEventListener('click', handleConfirmExpense);
+    document.getElementById('cancel-expense').addEventListener('click', handleCancelExpense);
+    
+    // Modal close
+    document.querySelector('.close').addEventListener('click', hideProfileModal);
+    document.getElementById('profile-modal').addEventListener('click', function(e) {
+        if (e.target === this) hideProfileModal();
+    });
+}
+
+// Onboarding Handler
+function handleStartButton() {
+    const userName = document.getElementById('user-name').value.trim();
+    if (!userName) {
+        alert('Please enter your name');
+        return;
+    }
+    
+    currentUser = { name: userName };
+    localStorage.setItem('currentUser', JSON.stringify(currentUser));
+    showScreen('auth-screen');
+}
+
+// Google Authentication (Modern GSI Approach)
+let initAttempts = 0;
+const maxInitAttempts = 10; // 5 seconds total
+
+function initializeGoogleAPI() {
+    initAttempts++;
+    
+    // Wait for Google Identity Services to load
+    if (typeof google !== 'undefined' && google.accounts) {
+        console.log('Google Identity Services loaded, initializing...');
+        initAuth();
+    } else {
+        console.log(`Waiting for Google Identity Services to load... (attempt ${initAttempts})`);
+        
+        if (initAttempts >= maxInitAttempts) {
+            console.error('Google Identity Services failed to load');
+            const authButton = document.getElementById('google-auth-btn');
+            if (authButton) {
+                authButton.textContent = 'Google API Failed - Refresh Page';
+                authButton.style.backgroundColor = '#f44336';
+                authButton.disabled = true;
+            }
+            return;
+        }
+        
+        setTimeout(initializeGoogleAPI, 500);
+    }
+}
+
+function initAuth() {
+    try {
+        // Initialize Google Identity Services (much faster than old gapi)
+        console.log('Initializing Google Identity Services...');
+        
+        // Mark API as ready immediately (GSI is much faster)
+        googleApiReady = true;
+        console.log('Google Identity Services initialized successfully');
+        
+        // Enable the Google Auth button
+        const authButton = document.getElementById('google-auth-btn');
+        if (authButton) {
+            authButton.disabled = false;
+            authButton.textContent = 'Sign in with Google';
+            authButton.style.opacity = '1';
+        }
+        
+    } catch (error) {
+        console.error('Google Identity Services initialization failed:', error);
+        alert('Failed to initialize Google Identity Services. Please check your Client ID and try again.');
+        
+        // Show error state on button
+        const authButton = document.getElementById('google-auth-btn');
+        if (authButton) {
+            authButton.textContent = 'Google API Failed - Refresh Page';
+            authButton.style.backgroundColor = '#f44336';
+        }
+    }
+}
+
+function handleGoogleAuth() {
+    // Check if Google Identity Services is ready
+    if (!googleApiReady) {
+        alert('Google Identity Services is still loading. Please wait a moment and try again.');
+        return;
+    }
+    
+    if (typeof google === 'undefined' || !google.accounts) {
+        alert('Google Identity Services not loaded. Please refresh the page and try again.');
+        return;
+    }
+    
+    // Show loading state
+    const authButton = document.getElementById('google-auth-btn');
+    if (authButton) {
+        authButton.disabled = true;
+        authButton.textContent = 'Signing in...';
+        authButton.style.opacity = '0.7';
+    }
+    
+    // Initialize OAuth2 token client (Modern GSI approach)
+    const tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CONFIG.GOOGLE_CLIENT_ID,
+        scope: CONFIG.GOOGLE_SHEETS_SCOPE,
+        callback: (tokenResponse) => {
+            if (tokenResponse.error) {
+                console.error('Authentication failed:', tokenResponse.error);
+                alert('Authentication failed. Please try again.');
+                
+                // Reset button state
+                if (authButton) {
+                    authButton.disabled = false;
+                    authButton.textContent = 'Sign in with Google';
+                    authButton.style.opacity = '1';
+                }
+                return;
+            }
+            
+            // Store access token
+            currentUser.accessToken = tokenResponse.access_token;
+            
+            // Get user profile info
+            getUserProfile(tokenResponse.access_token).then(profile => {
+                currentUser.email = profile.email;
+                currentUser.googleId = profile.id;
+                currentUser.name = currentUser.name || profile.name;
+                
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                
+                // Create or access Google Sheet
+                createExpenseSheet().then(() => {
+                    showScreen('chat-screen');
+                    updateProfile();
+                });
+            }).catch(error => {
+                console.error('Failed to get user profile:', error);
+                alert('Failed to get user profile. Please try again.');
+                
+                // Reset button state
+                if (authButton) {
+                    authButton.disabled = false;
+                    authButton.textContent = 'Sign in with Google';
+                    authButton.style.opacity = '1';
+                }
+            });
+        }
+    });
+    
+    // Request access token
+    tokenClient.requestAccessToken({ prompt: 'consent' });
+}
+
+// Get user profile using access token
+async function getUserProfile(accessToken) {
+    try {
+        const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+            headers: {
+                'Authorization': `Bearer ${accessToken}`
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to get user profile');
+        }
+        
+        return await response.json();
+    } catch (error) {
+        console.error('Error getting user profile:', error);
+        throw error;
+    }
+}
+
+// Google Sheets Management (Modern fetch approach)
+async function createExpenseSheet() {
+    try {
+        console.log('Creating/accessing Google Sheet...');
+        
+        // Check if sheet exists or create new one
+        const sheetId = await findOrCreateSheet();
+        currentUser.sheetId = sheetId;
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+        
+        return sheetId;
+    } catch (error) {
+        console.error('Error creating/accessing sheet:', error);
+        alert('Error accessing Google Sheets. Please try again.');
+    }
+}
+
+async function findOrCreateSheet() {
+    try {
+        const targetSheetName = `${CONFIG.SHEET_NAME} - ${currentUser.name}`;
+        console.log(`Looking for existing sheet: ${targetSheetName}`);
+        
+        // First, try to find existing sheet using serverless function
+        const findResponse = await fetch(CONFIG.API_ENDPOINTS.GOOGLE_SHEETS, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'findSheet',
+                accessToken: currentUser.accessToken,
+                sheetName: targetSheetName
+            })
+        });
+        
+        if (!findResponse.ok) {
+            throw new Error(`Failed to search for existing sheet: ${findResponse.status}`);
+        }
+        
+        const findData = await findResponse.json();
+        
+        if (findData.found) {
+            console.log(`Found existing sheet: ${findData.spreadsheetId}`);
+            return findData.spreadsheetId;
+        }
+        
+        // If no existing sheet found, create a new one using serverless function
+        console.log('Creating new Google Sheet...');
+        
+        const createResponse = await fetch(CONFIG.API_ENDPOINTS.GOOGLE_SHEETS, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'createSheet',
+                accessToken: currentUser.accessToken,
+                sheetName: CONFIG.SHEET_NAME,
+                userName: currentUser.name
+            })
+        });
+        
+        if (!createResponse.ok) {
+            throw new Error(`Failed to create sheet: ${createResponse.status}`);
+        }
+        
+        const createData = await createResponse.json();
+        console.log('Sheet created successfully:', createData.spreadsheetId);
+        
+        return createData.spreadsheetId;
+    } catch (error) {
+        console.error('Error finding/creating sheet:', error);
+        throw error;
+    }
+}
+
+async function findExistingSheet(sheetName) {
+    try {
+        // Use Google Drive API to search for existing spreadsheets
+        const searchResponse = await fetch(`https://www.googleapis.com/drive/v3/files?q=name='${sheetName}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false&orderBy=createdTime desc&pageSize=1`, {
+            headers: {
+                'Authorization': `Bearer ${currentUser.accessToken}`
+            }
+        });
+        
+        if (!searchResponse.ok) {
+            console.warn('Failed to search for existing sheets, will create new one');
+            return null;
+        }
+        
+        const searchData = await searchResponse.json();
+        if (searchData.files && searchData.files.length > 0) {
+            return {
+                id: searchData.files[0].id,
+                name: searchData.files[0].name
+            };
+        }
+        
+        return null;
+    } catch (error) {
+        console.warn('Error searching for existing sheet:', error);
+        return null;
+    }
+}
+
+// Voice Recognition
+function initializeVoiceRecognition() {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SpeechRecognition();
+        
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US'; // You can add Hindi support: 'hi-IN'
+        
+        recognition.onstart = function() {
+            isListening = true;
+            document.getElementById('voice-btn').classList.add('active');
+            document.getElementById('voice-status').classList.add('active');
+        };
+        
+        recognition.onresult = function(event) {
+            const transcript = event.results[0][0].transcript;
+            document.getElementById('text-input').value = transcript;
+            handleSendMessage();
+        };
+        
+        recognition.onend = function() {
+            isListening = false;
+            document.getElementById('voice-btn').classList.remove('active');
+            document.getElementById('voice-status').classList.remove('active');
+        };
+        
+        recognition.onerror = function(event) {
+            console.error('Speech recognition error:', event.error);
+            alert('Voice recognition error. Please try again.');
+        };
+    } else {
+        console.log('Speech recognition not supported');
+        document.getElementById('voice-btn').style.display = 'none';
+    }
+}
+
+function handleVoiceInput() {
+    if (!recognition) {
+        alert('Voice recognition not supported in this browser');
+        return;
+    }
+    
+    if (isListening) {
+        recognition.stop();
+    } else {
+        recognition.start();
+    }
+}
+
+// Chat Functionality
+function handleInputKeyPress(e) {
+    if (e.key === 'Enter') {
+        handleSendMessage();
+    }
+}
+
+function handleSendMessage() {
+    const input = document.getElementById('text-input');
+    const message = input.value.trim();
+    
+    if (!message) return;
+    
+    // Add user message to chat
+    addMessageToChat(message, 'user');
+    
+    // Clear input
+    input.value = '';
+    
+    // Process the message
+    processExpenseInput(message);
+}
+
+function addMessageToChat(message, sender) {
+    const messagesContainer = document.getElementById('messages-container');
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${sender}-message`;
+    
+    const messageContent = document.createElement('div');
+    messageContent.className = 'message-content';
+    messageContent.textContent = message;
+    
+    messageDiv.appendChild(messageContent);
+    messagesContainer.appendChild(messageDiv);
+    
+    // Scroll to bottom
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+// Expense processing with secure API
+async function processExpenseInput(input) {
+    try {
+        addMessageToChat('Processing your expense...', 'bot');
+        
+        // Use secure API endpoint for OpenAI processing
+        let expenseData;
+        
+        try {
+            const response = await fetch(`${window.location.origin}/api/parse-expense`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ text: input })
+            });
+            
+            if (response.ok) {
+                expenseData = await response.json();
+                console.log('AI-parsed expense data:', expenseData);
+            } else {
+                throw new Error('API parsing failed');
+            }
+        } catch (apiError) {
+            console.warn('API parsing failed, using fallback parser:', apiError);
+            // Fallback to local parsing if API is unavailable
+            expenseData = parseExpenseData(input);
+        }
+        
+        console.log('Final expense data:', expenseData);
+        
+        if (expenseData && expenseData.amount > 0) {
+            currentExpenseData = expenseData;
+            console.log('Setting currentExpenseData:', currentExpenseData);
+            showExpenseConfirmation(expenseData);
+        } else {
+            addMessageToChat('I couldn\'t understand the expense amount. Please try again with format like "Spent 500 on groceries" or "Paid 200 for fuel"', 'bot');
+        }
+    } catch (error) {
+        console.error('Error processing expense:', error);
+        addMessageToChat('Sorry, I encountered an error processing your expense. Please try again.', 'bot');
+    }
+}
+
+// Simple expense parser (replace with OpenAI API call in production)
+function parseExpenseData(input) {
+    console.log('Parsing input:', input);
+    
+    const amountMatch = input.match(/(\d+(?:\.\d{2})?)/);
+    const amount = amountMatch ? parseFloat(amountMatch[1]) : 0;
+    
+    console.log('Amount match:', amountMatch, 'Parsed amount:', amount);
+    
+    // Simple category detection
+    const categories = {
+        'food': ['food', 'restaurant', 'groceries', 'lunch', 'dinner', 'breakfast'],
+        'transport': ['fuel', 'gas', 'taxi', 'uber', 'bus', 'train'],
+        'shopping': ['shopping', 'clothes', 'shoes', 'electronics'],
+        'entertainment': ['movie', 'game', 'entertainment', 'fun'],
+        'utilities': ['electricity', 'water', 'internet', 'phone'],
+        'healthcare': ['doctor', 'medicine', 'hospital', 'clinic']
+    };
+    
+    let category = 'general';
+    for (const [cat, keywords] of Object.entries(categories)) {
+        if (keywords.some(keyword => input.toLowerCase().includes(keyword))) {
+            category = cat;
+            break;
+        }
+    }
+    
+    const result = {
+        amount: amount,
+        category: category,
+        description: input,
+        date: new Date().toISOString().split('T')[0],
+        paymentMode: 'cash' // Default, could be enhanced
+    };
+    
+    console.log('Returning parsed result:', result);
+    return result;
+}
+
+// Expense Confirmation
+function showExpenseConfirmation(expenseData) {
+    document.getElementById('expense-amount').textContent = `₹${expenseData.amount}`;
+    document.getElementById('expense-category').textContent = expenseData.category;
+    document.getElementById('expense-description').textContent = expenseData.description;
+    document.getElementById('expense-date').textContent = expenseData.date;
+    document.getElementById('expense-form').style.display = 'block';
+    
+    // Hide messages to focus on confirmation
+    document.getElementById('messages-container').style.display = 'none';
+}
+
+function handleConfirmExpense() {
+    if (!currentExpenseData) {
+        console.error('No expense data available');
+        return;
+    }
+    
+    // Prevent multiple clicks by disabling the button
+    const confirmBtn = document.getElementById('confirm-expense-btn');
+    const cancelBtn = document.getElementById('cancel-expense-btn');
+    
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Adding...';
+    }
+    if (cancelBtn) {
+        cancelBtn.disabled = true;
+    }
+    
+    // Store the expense data locally to prevent race conditions
+    const expenseToAdd = { ...currentExpenseData };
+    
+    addExpenseToSheet(expenseToAdd).then(() => {
+        hideExpenseForm();
+        addMessageToChat(`✅ Expense of ₹${expenseToAdd.amount} for ${expenseToAdd.category} has been added to your sheet!`, 'bot');
+    }).catch(error => {
+        console.error('Error adding expense:', error);
+        addMessageToChat('Sorry, there was an error adding your expense. Please try again.', 'bot');
+        hideExpenseForm();
+    }).finally(() => {
+        // Re-enable buttons
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'Add Expense';
+        }
+        if (cancelBtn) {
+            cancelBtn.disabled = false;
+        }
+    });
+}
+
+function handleCancelExpense() {
+    hideExpenseForm();
+    addMessageToChat('Expense cancelled. Feel free to add another expense.', 'bot');
+}
+
+function hideExpenseForm() {
+    document.getElementById('expense-form').style.display = 'none';
+    document.getElementById('messages-container').style.display = 'block';
+    currentExpenseData = null;
+}
+
+// Add expense to Google Sheet (Using serverless function)
+async function addExpenseToSheet(expenseData) {
+    try {
+        // Validate input data
+        if (!expenseData) {
+            throw new Error('No expense data provided');
+        }
+        
+        if (!expenseData.amount || expenseData.amount <= 0) {
+            throw new Error('Invalid expense amount');
+        }
+        
+        if (!currentUser.sheetId) {
+            throw new Error('No expense sheet available');
+        }
+        
+        if (!currentUser.accessToken) {
+            throw new Error('No access token available');
+        }
+        
+        // Prepare expense data
+        const formattedExpenseData = {
+            date: expenseData.date || new Date().toISOString().split('T')[0],
+            amount: expenseData.amount,
+            category: expenseData.category || 'general',
+            description: expenseData.description || 'No description',
+            paymentMode: expenseData.paymentMode || 'cash'
+        };
+        
+        console.log('Adding expense to sheet via serverless function:', formattedExpenseData);
+        
+        const response = await fetch(CONFIG.API_ENDPOINTS.GOOGLE_SHEETS, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'addExpense',
+                accessToken: currentUser.accessToken,
+                spreadsheetId: currentUser.sheetId,
+                expenseData: formattedExpenseData
+            })
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Serverless function error:', errorText);
+            throw new Error(`Failed to add expense: ${response.status} - ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log('Expense added to sheet successfully:', result);
+    } catch (error) {
+        console.error('Error adding to sheet:', error);
+        throw error;
+    }
+}
+
+// Profile Management
+function showProfileModal() {
+    document.getElementById('profile-modal').classList.add('active');
+}
+
+function hideProfileModal() {
+    document.getElementById('profile-modal').classList.remove('active');
+}
+
+function updateProfile() {
+    document.getElementById('profile-name').textContent = currentUser.name;
+    document.getElementById('profile-email').textContent = currentUser.email || 'Not connected';
+    document.getElementById('user-initial').textContent = currentUser.name.charAt(0).toUpperCase();
+    document.getElementById('sheet-status').textContent = currentUser.sheetId ? 'Connected' : 'Not connected';
+}
+
+function handleLogout() {
+    localStorage.removeItem('currentUser');
+    currentUser = null;
+    
+    // Sign out from Google (GSI approach)
+    if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
+        google.accounts.id.disableAutoSelect();
+    }
+    
+    hideProfileModal();
+    showScreen('onboarding-screen');
+}
+
+// Service Worker Registration for PWA
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+        navigator.serviceWorker.register('sw.js').then(function(registration) {
+            console.log('ServiceWorker registration successful with scope: ', registration.scope);
+        }, function(err) {
+            console.log('ServiceWorker registration failed: ', err);
+        });
+    });
+}
+
+// Utility Functions
+function formatCurrency(amount) {
+    return new Intl.NumberFormat('en-IN', {
+        style: 'currency',
+        currency: 'INR'
+    }).format(amount);
+}
+
+function formatDate(date) {
+    return new Date(date).toLocaleDateString('en-IN');
+}
+
+// Helper function for testing - sets currentUser
+function setCurrentUser(user) {
+    currentUser = user;
+}
+
+// Helper function for testing - gets currentUser
+function getCurrentUser() {
+    return currentUser;
+}
+
+// Export functions for testing (ES6 exports)
+export {
+    parseExpenseData,
+    formatCurrency,
+    formatDate,
+    addMessageToChat,
+    showScreen,
+    showExpenseConfirmation,
+    hideExpenseForm,
+    updateProfile,
+    showProfileModal,
+    hideProfileModal,
+    setCurrentUser,
+    getCurrentUser,
+    findExistingSheet
+}; 

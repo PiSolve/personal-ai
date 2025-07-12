@@ -1,0 +1,44 @@
+# Cursor IDE Rules
+
+## Code Style & Standards
+- Use consistent indentation (2 spaces for JS/TS, 4 spaces for Python)
+- Follow language-specific naming conventions (camelCase for JS/TS, snake_case for Python)
+- Add meaningful comments for complex logic
+- Use descriptive variable and function names
+- Keep functions small and focused on a single responsibility
+
+## File Organization
+- Group related files in logical directories
+- Use clear, descriptive file names
+- Maintain a clean project structure
+- Keep configuration files in root or appropriate config directories
+
+## Best Practices
+- Write tests for new features and bug fixes
+- Use TypeScript for better type safety in JS projects
+- Implement proper error handling
+- Follow security best practices
+- Use environment variables for configuration
+- Add proper logging for debugging
+
+## AI Assistant Guidelines
+- Provide complete, working code solutions
+- Include necessary imports and dependencies
+- Add helpful comments explaining complex logic
+- Consider edge cases and error scenarios
+- Suggest improvements and optimizations when relevant
+- Follow the existing codebase patterns and conventions
+
+## Git & Version Control
+- Write clear, descriptive commit messages
+- Use conventional commit format when possible
+- Keep commits focused and atomic
+- Don't commit sensitive information like API keys
+- Use .gitignore appropriately
+
+## Documentation
+- Keep README files up to date
+- Document API endpoints and usage
+- Include setup and installation instructions
+- Add examples for complex features
+- Document any special requirements or dependencies 
