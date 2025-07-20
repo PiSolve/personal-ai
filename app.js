@@ -14,25 +14,52 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
 });
 
-// Load configuration from serverless function
+// Load configuration from serverless function or environment
 async function loadConfiguration() {
     try {
-        console.log('Loading configuration from serverless function...');
+        console.log('⚙️ Loading configuration from serverless function...');
         
         const response = await fetch('/api/config');
         if (!response.ok) {
             throw new Error(`Configuration loading failed: ${response.status}`);
         }
         
-        CONFIG = await response.json();
-        console.log('Configuration loaded successfully');
+        const serverConfig = await response.json();
+        
+        // Validate required configuration
+        if (!serverConfig.GOOGLE_CLIENT_ID || serverConfig.GOOGLE_CLIENT_ID.includes('your-google-client-id')) {
+            throw new Error('Google Client ID not properly configured in environment variables');
+        }
+        
+        // Set global configuration for production
+        CONFIG = {
+            GOOGLE_CLIENT_ID: serverConfig.GOOGLE_CLIENT_ID,
+            GOOGLE_SHEETS_SCOPE: serverConfig.GOOGLE_SHEETS_SCOPE,
+            APP_NAME: serverConfig.APP_NAME,
+            SHEET_NAME: serverConfig.SHEET_NAME,
+            EXPENSE_CATEGORIES: serverConfig.EXPENSE_CATEGORIES,
+            PAYMENT_MODES: serverConfig.PAYMENT_MODES,
+            API_ENDPOINTS: serverConfig.API_ENDPOINTS
+        };
+        
+        console.log('✅ Configuration loaded from server successfully');
+        return CONFIG;
         
     } catch (error) {
-        console.error('Failed to load configuration:', error);
+        console.error('❌ Failed to load configuration from server:', error.message);
         
-        // Fallback to local configuration for development
+        // For development only - check if running locally
+        const isLocalDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        
+        if (!isLocalDevelopment) {
+            // Production environment should always have serverless config
+            alert('Configuration error: Please ensure environment variables are set in Vercel dashboard.');
+            throw new Error('Production configuration failed - environment variables missing');
+        }
+        
+        // Local development fallback (without API keys)
         CONFIG = {
-            GOOGLE_CLIENT_ID: 'YOUR_GOOGLE_CLIENT_ID_HERE',
+            GOOGLE_CLIENT_ID: null, // Will trigger error message
             GOOGLE_SHEETS_SCOPE: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly',
             APP_NAME: 'Personal Expense Tracker',
             SHEET_NAME: 'Personal Expenses',
@@ -45,8 +72,52 @@ async function loadConfiguration() {
             }
         };
         
-        console.log('Using fallback configuration');
+        console.warn('⚠️ Using fallback configuration for local development');
+        return CONFIG;
     }
+}
+
+// Validate configuration before proceeding
+function validateConfiguration() {
+    if (!CONFIG) {
+        throw new Error('Configuration not loaded');
+    }
+    
+    if (!CONFIG.GOOGLE_CLIENT_ID) {
+        const errorMsg = 'Google Client ID is missing. Please:\n' +
+                        '1. Add GOOGLE_CLIENT_ID to Vercel environment variables\n' +
+                        '2. Redeploy your application\n' +
+                        '3. Refresh this page';
+        alert(errorMsg);
+        throw new Error('Google Client ID not configured');
+    }
+    
+    if (CONFIG.GOOGLE_CLIENT_ID.includes('your-google-client-id')) {
+        alert('Google Client ID is not properly configured. Please update your environment variables.');
+        throw new Error('Invalid Google Client ID');
+    }
+    
+    console.log('✅ Configuration validation passed');
+    return true;
+}
+
+// Show configuration error to user
+function showConfigurationError(errorMessage) {
+    const errorHtml = `
+        <div style="max-width: 400px; margin: 50px auto; padding: 20px; background: #ffe6e6; border: 1px solid #ff9999; border-radius: 8px; font-family: Arial, sans-serif;">
+            <h3 style="color: #cc0000; margin-top: 0;">⚠️ Configuration Error</h3>
+            <p style="color: #333;">${errorMessage}</p>
+            <p style="color: #666; font-size: 14px;"><strong>For developers:</strong></p>
+            <ol style="color: #666; font-size: 14px; padding-left: 20px;">
+                <li>Check Vercel environment variables</li>
+                <li>Ensure GOOGLE_CLIENT_ID is set</li>
+                <li>Redeploy the application</li>
+            </ol>
+            <button onclick="window.location.reload()" style="background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Retry</button>
+        </div>
+    `;
+    
+    document.body.innerHTML = errorHtml;
 }
 
 // Add a window load event to ensure all scripts are loaded
@@ -62,11 +133,14 @@ window.addEventListener('load', function() {
 
 // App Initialization
 async function initializeApp() {
-    console.log('Initializing app...');
+    console.log('🚀 Initializing app...');
     
     try {
         // Load configuration from serverless function
         await loadConfiguration();
+        
+        // Validate configuration
+        validateConfiguration();
         
         // Check user onboarding status and show appropriate screen
         navigateToCorrectScreen();
@@ -80,13 +154,13 @@ async function initializeApp() {
         // Initialize Google API
         initializeGoogleAPI();
         
-        console.log('App initialization complete');
+        console.log('✅ App initialization complete');
         
     } catch (error) {
-        console.error('App initialization failed:', error);
+        console.error('❌ App initialization failed:', error);
         
-        // Fallback to onboarding screen on error
-        showScreen('onboarding-screen');
+        // Show error screen instead of falling back
+        showConfigurationError(error.message);
     }
 }
 
