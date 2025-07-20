@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug: Serverless Functions & Environment Variables</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+        .debug-info { background: #f0f0f0; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .error { background: #ffeeee; border: 1px solid #ff0000; }
+        .success { background: #eeffee; border: 1px solid #00ff00; }
+        .warning { background: #ffffee; border: 1px solid #ffaa00; }
+        .code { background: #f8f8f8; padding: 10px; border-radius: 3px; font-family: monospace; white-space: pre-wrap; }
+        button { padding: 10px 15px; margin: 5px; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-danger { background: #dc3545; color: white; }
+    </style>
+</head>
+<body>
+    <h1>🔧 Debug: Serverless Functions & Environment Variables</h1>
+    
+    <div class="debug-info">
+        <h3>Current Environment:</h3>
+        <p><strong>Domain:</strong> <span id="current-domain"></span></p>
+        <p><strong>Time:</strong> <span id="current-time"></span></p>
+    </div>
+
+    <div class="debug-info">
+        <h3>Test 1: Direct API Call</h3>
+        <button class="btn-primary" onclick="testConfigAPI()">Test /api/config</button>
+        <div id="config-test-results"></div>
+    </div>
+
+    <div class="debug-info">
+        <h3>Test 2: Check Response Headers</h3>
+        <button class="btn-primary" onclick="testAPIHeaders()">Test Headers</button>
+        <div id="headers-test-results"></div>
+    </div>
+
+    <div class="debug-info">
+        <h3>Test 3: Parse Expense API</h3>
+        <button class="btn-primary" onclick="testParseExpenseAPI()">Test /api/parse-expense</button>
+        <div id="parse-test-results"></div>
+    </div>
+
+    <div class="debug-info">
+        <h3>Console Logs:</h3>
+        <div id="console-logs" class="code"></div>
+        <button class="btn-success" onclick="clearLogs()">Clear Logs</button>
+    </div>
+
+    <script>
+        // Display current info
+        document.getElementById('current-domain').textContent = window.location.origin;
+        document.getElementById('current-time').textContent = new Date().toISOString();
+
+        // Capture console logs
+        const originalLog = console.log;
+        const originalError = console.error;
+        const originalWarn = console.warn;
+        let logs = [];
+
+        function addLog(type, ...args) {
+            const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+            logs.push(`[${timestamp}] ${type.toUpperCase()}: ${args.join(' ')}`);
+            updateLogDisplay();
+            
+            // Call original function
+            if (type === 'error') originalError(...args);
+            else if (type === 'warn') originalWarn(...args);
+            else originalLog(...args);
+        }
+
+        console.log = (...args) => addLog('log', ...args);
+        console.error = (...args) => addLog('error', ...args);
+        console.warn = (...args) => addLog('warn', ...args);
+
+        function updateLogDisplay() {
+            document.getElementById('console-logs').textContent = logs.slice(-20).join('\n');
+        }
+
+        function clearLogs() {
+            logs = [];
+            updateLogDisplay();
+        }
+
+        // Test functions
+        async function testConfigAPI() {
+            const resultsDiv = document.getElementById('config-test-results');
+            resultsDiv.innerHTML = '<p>Testing...</p>';
+            
+            try {
+                console.log('🧪 Testing /api/config endpoint...');
+                
+                const response = await fetch('/api/config');
+                console.log('📥 Response received:', response.status, response.statusText);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('❌ Response not ok:', errorText);
+                    resultsDiv.innerHTML = `
+                        <div class="error">
+                            <h4>❌ API Test Failed</h4>
+                            <p><strong>Status:</strong> ${response.status} ${response.statusText}</p>
+                            <p><strong>Response:</strong></p>
+                            <div class="code">${errorText}</div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                const config = await response.json();
+                console.log('✅ Config received:', config);
+                
+                resultsDiv.innerHTML = `
+                    <div class="success">
+                        <h4>✅ API Test Successful</h4>
+                        <p><strong>Google Client ID:</strong> ${config.GOOGLE_CLIENT_ID || 'NOT SET'}</p>
+                        <p><strong>Has Environment Variables:</strong> ${config.DEBUG_INFO?.hasGoogleClientId ? 'Yes' : 'No'}</p>
+                        <p><strong>Environment:</strong> ${config.DEBUG_INFO?.env || 'Unknown'}</p>
+                        <p><strong>Response:</strong></p>
+                        <div class="code">${JSON.stringify(config, null, 2)}</div>
+                    </div>
+                `;
+                
+            } catch (error) {
+                console.error('❌ Test failed:', error);
+                resultsDiv.innerHTML = `
+                    <div class="error">
+                        <h4>❌ Test Failed</h4>
+                        <p><strong>Error:</strong> ${error.message}</p>
+                        <div class="code">${error.stack}</div>
+                    </div>
+                `;
+            }
+        }
+
+        async function testAPIHeaders() {
+            const resultsDiv = document.getElementById('headers-test-results');
+            resultsDiv.innerHTML = '<p>Testing...</p>';
+            
+            try {
+                console.log('🧪 Testing API headers...');
+                
+                const response = await fetch('/api/config');
+                console.log('📥 Headers received');
+                
+                let headersText = '';
+                response.headers.forEach((value, key) => {
+                    headersText += `${key}: ${value}\n`;
+                });
+                
+                resultsDiv.innerHTML = `
+                    <div class="success">
+                        <h4>Response Headers:</h4>
+                        <div class="code">${headersText}</div>
+                    </div>
+                `;
+                
+            } catch (error) {
+                console.error('❌ Headers test failed:', error);
+                resultsDiv.innerHTML = `
+                    <div class="error">
+                        <h4>❌ Headers Test Failed</h4>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function testParseExpenseAPI() {
+            const resultsDiv = document.getElementById('parse-test-results');
+            resultsDiv.innerHTML = '<p>Testing...</p>';
+            
+            try {
+                console.log('🧪 Testing /api/parse-expense endpoint...');
+                
+                const response = await fetch('/api/parse-expense', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ text: 'Spent 100 on groceries' })
+                });
+                
+                console.log('📥 Parse response received:', response.status);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('❌ Parse response not ok:', errorText);
+                    resultsDiv.innerHTML = `
+                        <div class="warning">
+                            <h4>⚠️ Parse API Test</h4>
+                            <p><strong>Status:</strong> ${response.status} ${response.statusText}</p>
+                            <p><strong>Note:</strong> This may fail if OpenAI API key is not set, but 404 means serverless function is missing</p>
+                            <div class="code">${errorText}</div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                const result = await response.json();
+                console.log('✅ Parse result:', result);
+                
+                resultsDiv.innerHTML = `
+                    <div class="success">
+                        <h4>✅ Parse API Working</h4>
+                        <div class="code">${JSON.stringify(result, null, 2)}</div>
+                    </div>
+                `;
+                
+            } catch (error) {
+                console.error('❌ Parse test failed:', error);
+                resultsDiv.innerHTML = `
+                    <div class="error">
+                        <h4>❌ Parse Test Failed</h4>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Auto-test on load
+        console.log('🚀 Debug page loaded');
+        setTimeout(testConfigAPI, 1000);
+    </script>
+</body>
+</html> 

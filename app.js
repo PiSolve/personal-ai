@@ -16,20 +16,51 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Load configuration from serverless function or environment
 async function loadConfiguration() {
+    console.log('🔧 CLIENT: Starting configuration load...');
+    console.log('🌍 CLIENT: Current location:', window.location.href);
+    console.log('🔍 CLIENT: Hostname:', window.location.hostname);
+    
     try {
-        console.log('⚙️ Loading configuration from serverless function...');
+        console.log('⚙️ CLIENT: Loading configuration from serverless function...');
+        console.log('📡 CLIENT: Calling /api/config...');
         
         const response = await fetch('/api/config');
+        console.log('📥 CLIENT: Response received');
+        console.log('📊 CLIENT: Response status:', response.status);
+        console.log('📝 CLIENT: Response ok:', response.ok);
+        console.log('🔗 CLIENT: Response URL:', response.url);
+        
         if (!response.ok) {
-            throw new Error(`Configuration loading failed: ${response.status}`);
+            console.error('❌ CLIENT: Response not ok');
+            console.error('📊 CLIENT: Status:', response.status);
+            console.error('📄 CLIENT: Status text:', response.statusText);
+            
+            // Try to get response text for more details
+            try {
+                const errorText = await response.text();
+                console.error('📄 CLIENT: Response body:', errorText);
+            } catch (e) {
+                console.error('❌ CLIENT: Could not read response body:', e);
+            }
+            
+            throw new Error(`Configuration loading failed: ${response.status} - ${response.statusText}`);
         }
         
+        console.log('🔄 CLIENT: Parsing JSON response...');
         const serverConfig = await response.json();
+        console.log('✅ CLIENT: JSON parsed successfully');
+        console.log('📝 CLIENT: Server config keys:', Object.keys(serverConfig));
+        console.log('🔑 CLIENT: Google Client ID from server:', serverConfig.GOOGLE_CLIENT_ID ? serverConfig.GOOGLE_CLIENT_ID.substring(0, 20) + '...' : 'NOT SET');
+        console.log('🐛 CLIENT: Debug info from server:', serverConfig.DEBUG_INFO);
         
         // Validate required configuration
         if (!serverConfig.GOOGLE_CLIENT_ID || serverConfig.GOOGLE_CLIENT_ID.includes('your-google-client-id')) {
+            console.error('❌ CLIENT: Google Client ID validation failed');
+            console.error('🔑 CLIENT: Received Google Client ID:', serverConfig.GOOGLE_CLIENT_ID);
             throw new Error('Google Client ID not properly configured in environment variables');
         }
+        
+        console.log('✅ CLIENT: Google Client ID validation passed');
         
         // Set global configuration for production
         CONFIG = {
@@ -42,20 +73,28 @@ async function loadConfiguration() {
             API_ENDPOINTS: serverConfig.API_ENDPOINTS
         };
         
-        console.log('✅ Configuration loaded from server successfully');
+        console.log('✅ CLIENT: Configuration loaded from server successfully');
+        console.log('📋 CLIENT: Final CONFIG object keys:', Object.keys(CONFIG));
         return CONFIG;
         
     } catch (error) {
-        console.error('❌ Failed to load configuration from server:', error.message);
+        console.error('❌ CLIENT: Failed to load configuration from server');
+        console.error('📝 CLIENT: Error type:', error.constructor.name);
+        console.error('📄 CLIENT: Error message:', error.message);
+        console.error('📍 CLIENT: Error stack:', error.stack);
         
         // For development only - check if running locally
         const isLocalDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        console.log('🏠 CLIENT: Is local development:', isLocalDevelopment);
         
         if (!isLocalDevelopment) {
             // Production environment should always have serverless config
+            console.error('🚨 CLIENT: Production environment detected - configuration must work');
             alert('Configuration error: Please ensure environment variables are set in Vercel dashboard.');
             throw new Error('Production configuration failed - environment variables missing');
         }
+        
+        console.warn('⚠️ CLIENT: Local development detected - using fallback');
         
         // Local development fallback (without API keys)
         CONFIG = {
@@ -72,7 +111,7 @@ async function loadConfiguration() {
             }
         };
         
-        console.warn('⚠️ Using fallback configuration for local development');
+        console.warn('⚠️ CLIENT: Using fallback configuration for local development');
         return CONFIG;
     }
 }
