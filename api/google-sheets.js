@@ -1,7 +1,7 @@
 // Vercel serverless function for Google Sheets operations
 // This handles sheet creation and data manipulation server-side
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   // Enable CORS for your domain
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
@@ -163,4 +163,4 @@ async function addExpenseToSheet(req, res, accessToken) {
     console.error('Error adding expense to sheet:', error);
     res.status(500).json({ error: 'Failed to add expense to sheet' });
   }
-} 
+}; 

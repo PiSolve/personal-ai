@@ -1,7 +1,7 @@
 // Vercel serverless function for expense parsing
 // This keeps the OpenAI API key secure on the server side
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   // Enable CORS for your domain
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -56,25 +56,31 @@ export default async function handler(req, res) {
     
     try {
       const parsed = JSON.parse(content);
-      
-      // Add current date
-      parsed.date = new Date().toISOString().split('T')[0];
-      
       res.status(200).json(parsed);
     } catch (parseError) {
-      // Fallback to simple parsing if OpenAI doesn't return valid JSON
-      const amount = parseFloat(text.match(/\d+(?:\.\d{2})?/)?.[0] || '0');
-      res.status(200).json({
-        amount,
+      // Fallback parsing if OpenAI doesn't return valid JSON
+      const fallback = {
+        amount: parseFloat(text.match(/\d+(\.\d{2})?/)?.[0]) || 0,
         category: 'general',
         description: text,
         paymentMode: 'cash',
         date: new Date().toISOString().split('T')[0]
-      });
+      };
+      res.status(200).json(fallback);
     }
 
   } catch (error) {
     console.error('Error parsing expense:', error);
-    res.status(500).json({ error: 'Failed to parse expense' });
+    
+    // Fallback parsing
+    const fallback = {
+      amount: parseFloat(req.body.text?.match(/\d+(\.\d{2})?/)?.[0]) || 0,
+      category: 'general',
+      description: req.body.text || 'Unknown expense',
+      paymentMode: 'cash',
+      date: new Date().toISOString().split('T')[0]
+    };
+    
+    res.status(200).json(fallback);
   }
-} 
+}; 
